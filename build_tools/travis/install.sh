@@ -16,20 +16,14 @@
 
 set -e
 
-if [ $TRAVIS_OS_NAME = "macos" ]
-then
-  # Install jq for travis_fastfail.sh script
-  brew install jq
-fi
-
 # Fail fast
 build_tools/travis/travis_fastfail.sh
 
 echo 'List files from cached directories'
 echo 'pip:'
-ls $HOME/.cache/pip
+ls "$HOME"/.cache/pip
 
-if [ $TRAVIS_OS_NAME = "linux" ]
+if [ "$TRAVIS_OS_NAME" = "linux" ]
 then
 	export CC=/usr/lib/ccache/gcc
 	export CXX=/usr/lib/ccache/g++
@@ -37,7 +31,7 @@ then
 	# export CCACHE_LOGFILE=/tmp/ccache.log
 	# ~60M is used by .ccache when compiling from scratch at the time of writing
 	ccache --max-size 100M --show-stats
-elif [ $TRAVIS_OS_NAME = "osx" ]
+elif [ "$TRAVIS_OS_NAME" = "osx" ]
 then
     # enable OpenMP support for Apple-clang
     export CC=/usr/bin/clang
@@ -47,66 +41,39 @@ then
     export CXXFLAGS="$CXXFLAGS -I/usr/local/opt/libomp/include"
     export LDFLAGS="$LDFLAGS -L/usr/local/opt/libomp/lib -lomp"
     export DYLD_LIBRARY_PATH=/usr/local/opt/libomp/lib
-
-    # Install the OpenMP library
-		brew install libomp
-
-		# Install ccache manually for macOS environments
-		brew install ccache
 		export PATH="/usr/local/opt/ccache/libexec:$PATH"
 fi
 
 make_conda() {
-	TO_INSTALL="$@"
     # Deactivate the travis-provided virtual environment and setup a
     # conda-based environment instead
     # If Travvis has language=generic (e.g. for macOS), deactivate does not exist. `|| :` will pass.
     deactivate || :
 
     # Install miniconda
-    if [ $TRAVIS_OS_NAME = "osx" ]
-	  then
-		fname=Miniconda3-latest-MacOSX-x86_64.sh
-	  else
-		fname=Miniconda3-latest-Linux-x86_64.sh
-	  fi
-
-    wget https://repo.continuum.io/miniconda/$fname \
-        -O miniconda.sh
-    MINICONDA_PATH=$HOME/miniconda
-    chmod +x miniconda.sh && ./miniconda.sh -b -p $MINICONDA_PATH
-    export PATH=$MINICONDA_PATH/bin:$PATH
-    conda update --yes conda
+    wget https://repo.continuum.io/miniconda/"$MINICONDA_VERSION" -O miniconda.sh
+    MINICONDA=$HOME/miniconda
+    chmod +x miniconda.sh && ./miniconda.sh -b -p "$MINICONDA"
+    export PATH=$MINICONDA/bin:$PATH
+    conda config --set always_yes true
+    conda update --quiet conda
 
     # Set up test environment
-    conda create -n testenv --yes $TO_INSTALL
+    conda create --name testenv python="$PYTHON_VERSION"
 
     # Activate environment
     source activate testenv
 
-    # Install packages not available via conda
-    pip install scikit-posthocs==$SCIKIT_POSTHOCS_VERSION
-    pip install joblib==$JOBLIB_VERSION
+    # Install requirements from inside conda environment
+    pip install -r "$REQUIREMENTS"
 
-    # Add packages for website generation
-    # pip install sphinx_rtd_theme
-    # pip install nbsphinx
-
-    if [ "$TRAVIS_OS_NAME" == "linux" ] && [ "$TRAVIS_BRANCH" == "master" ]
-    then
-      pip install sphinx_rtd_theme
-      pip install nbsphinx
-      pip install sphinx
-      pip install jupyter
-    fi
+    # List installed environment
+    python --version
+    conda list -n testenv
 }
 
-TO_INSTALL="python=$PYTHON_VERSION pip pytest \
-            numpy=$NUMPY_VERSION scipy=$SCIPY_VERSION \
-            cython=$CYTHON_VERSION scikit-learn=$SKLEARN_VERSION \
-            pandas=$PANDAS_VERSION statsmodels=$STATSMODELS_VERSION \
-            wheel"
-make_conda $TO_INSTALL
+# requirements file
+make_conda "$REQUIREMENTS"
 
 if [ "$COVERAGE" == "true" ]
 then
@@ -115,16 +82,17 @@ fi
 
 # Build sktime in the install.sh script to collapse the verbose
 # build output in the travis output when it succeeds.
+# conda list
 
 # python setup.py develop  # invokes build_ext -i to compile files
 python setup.py bdist_wheel
 ls dist  # list build artifacts
 
 # Install from built wheels
-pip install --pre --no-index --find-links dist/ sktime
+pip install --pre --no-index --no-deps --find-links dist/ sktime
 
 # Useful for debugging how ccache is used
-if [ $TRAVIS_OS_NAME = "linux" ]
+if [ "$TRAVIS_OS_NAME" = "linux" ]
 then
 	ccache --show-stats
 fi
